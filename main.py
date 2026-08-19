@@ -4,39 +4,21 @@ import requests
 from datetime import datetime, timedelta
 
 # ==========================================
-# CONFIGURACIÓN GENERAL Y CREDENCIALES
+# CONFIGURACIÓN GENERAL - SANTOJANNI
 # ==========================================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Se obtienen las credenciales desde las Variables de Entorno de Railway
+TELEGRAM_TOKEN = os.getenv("8527874934:AAEkI3Mz-AD0sNpO2caooNM9sWyhw56x3iE")
+TELEGRAM_CHAT_ID = os.getenv("8295036704")
 
-# Definición de los tres polideportivos con sus respectivas canchas y sedeIds
-POLIDEPORTIVOS = [
-    {
-        "nombre": "Polideportivo Colegiales",
-        "servicio_id": "3149",
-        "canchas": [
-            {"nombre": "Cancha 1", "sede_id": "2263"},
-            {"nombre": "Cancha 2", "sede_id": "2279"}
-        ]
-    },
-    {
-        "nombre": "Polideportivo Onega",
-        "servicio_id": "3137",
-        "canchas": [
-            {"nombre": "Cancha 1", "sede_id": "2289"},
-            {"nombre": "Cancha 2", "sede_id": "2290"}
-        ]
-    },
-    {
-        "nombre": "Polideportivo Santojanni",
-        "servicio_id": "3125",
-        "canchas": [
-            {"nombre": "Cancha 1", "sede_id": "2255"},
-            {"nombre": "Cancha 2", "sede_id": "2256"},
-            {"nombre": "Cancha 3", "sede_id": "2257"},
-            {"nombre": "Cancha 4", "sede_id": "2258"}
-        ]
-    }
+NOMBRE_POLIDEPORTIVO = "Polideportivo Santojanni"
+SERVICIO_ID = "3125"
+
+# Configuración de las 4 canchas con sus sedeId escaneados
+CANCHAS = [
+    {"nombre": "Cancha 1", "sede_id": "2255"},
+    {"nombre": "Cancha 2", "sede_id": "2256"},
+    {"nombre": "Cancha 3", "sede_id": "2257"},
+    {"nombre": "Cancha 4", "sede_id": "2258"}
 ]
 
 DIAS_A_CONSULTAR = 30
@@ -51,7 +33,7 @@ DIAS_SEMANA = {
 def enviar_mensaje_telegram(mensaje):
     """Envía un mensaje a Telegram con formato HTML."""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ Error: Faltan las variables TELEGRAM_TOKEN o TELEGRAM_CHAT_ID.")
+        print("❌ Error: Faltan las variables de entorno TELEGRAM_TOKEN o TELEGRAM_CHAT_ID.")
         return False
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -69,28 +51,29 @@ def enviar_mensaje_telegram(mensaje):
         return False
 
 
-def crear_sesion_sigeci(servicio_id):
-    """Inicializa la sesión HTTP para capturar cookies y tokens necesarios."""
+def crear_sesion_sigeci():
+    """Inicializa la sesión HTTP para capturar cookies/tokens y evitar datos 'fantasma'."""
     session = requests.Session()
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36",
         "Accept": "*/*",
         "Accept-Language": "es-419,es;q=0.9,en;q=0.8",
         "X-Requested-With": "XMLHttpRequest",
-        "Referer": f"https://formulario-sigeci.buenosaires.gob.ar/AgendarTramite?idPrestacion={servicio_id}&flow=primeros"
+        "Referer": f"https://formulario-sigeci.buenosaires.gob.ar/AgendarTramite?idPrestacion={SERVICIO_ID}&flow=primeros"
     })
     
-    url_inicio = f"https://formulario-sigeci.buenosaires.gob.ar/AgendarTramite?idPrestacion={servicio_id}&flow=primeros"
+    # Primera consulta para establecer cookies y tokens iniciales en la sesión
+    url_inicio = f"https://formulario-sigeci.buenosaires.gob.ar/AgendarTramite?idPrestacion={SERVICIO_ID}&flow=primeros"
     try:
         session.get(url_inicio, timeout=10)
     except Exception as e:
-        print(f"⚠️ Aviso al inicializar sesión en prestación {servicio_id}: {e}")
+        print(f"⚠️ Aviso al inicializar sesión SIGECI: {e}")
         
     return session
 
 
 def extraer_horas_validas(lista_datos):
-    """Limpia y valida los datos de horarios devueltos por la API."""
+    """Limpia y valida los formatos de horas entregados por el SIGECI."""
     horas_validas = []
     if not isinstance(lista_datos, list):
         return horas_validas
@@ -118,14 +101,14 @@ def extraer_horas_validas(lista_datos):
     return sorted(list(set(horas_validas)))
 
 
-def consultar_cancha(poli_nombre, servicio_id, cancha_info):
+def consultar_cancha(cancha_info):
     global TURNOS_NOTIFICADOS
 
     nombre_cancha = cancha_info["nombre"]
     sede_id = cancha_info["sede_id"]
 
-    session = crear_sesion_sigeci(servicio_id)
-    url_reserva = f"https://formulario-sigeci.buenosaires.gob.ar/AgendarTramite?idPrestacion={servicio_id}"
+    session = crear_sesion_sigeci()
+    url_reserva = f"https://formulario-sigeci.buenosaires.gob.ar/AgendarTramite?idPrestacion={SERVICIO_ID}"
 
     hoy = datetime.now()
     lineas_resumen = []
@@ -140,7 +123,7 @@ def consultar_cancha(poli_nombre, servicio_id, cancha_info):
         params = {
             "day": fecha_str,
             "sedeId": sede_id,
-            "servicioId": servicio_id
+            "servicioId": SERVICIO_ID
         }
 
         try:
@@ -166,7 +149,7 @@ def consultar_cancha(poli_nombre, servicio_id, cancha_info):
                             texto_linea = f"📅 <b>{fecha_str}:</b> {', '.join(horas_limpias)}"
 
                         for h in horas_limpias:
-                            clave_unica = f"{servicio_id}|{sede_id}|{fecha_str}|{h}"
+                            clave_unica = f"{sede_id}|{fecha_str}|{h}"
                             turnos_visibles_hoy.add(clave_unica)
 
                             if clave_unica not in TURNOS_NOTIFICADOS:
@@ -178,10 +161,10 @@ def consultar_cancha(poli_nombre, servicio_id, cancha_info):
 
         time.sleep(0.05)
 
-    # Limpieza de memoria de turnos notificados que dejaron de estar disponibles
+    # Purga de memoria: elimina turnos notificados en el pasado que ya desaparecieron
     turnos_a_remover = [
         t for t in TURNOS_NOTIFICADOS 
-        if t.startswith(f"{servicio_id}|{sede_id}|") and t not in turnos_visibles_hoy
+        if t.startswith(f"{sede_id}|") and t not in turnos_visibles_hoy
     ]
     for t in turnos_a_remover:
         TURNOS_NOTIFICADOS.remove(t)
@@ -191,7 +174,7 @@ def consultar_cancha(poli_nombre, servicio_id, cancha_info):
         resumen_turnos = "\n".join(lineas_resumen)
         mensaje = (
             "🔔 <b>¡NUEVO TURNO DISPONIBLE EN CABA!</b> 🔔\n\n"
-            f"📍 <b>Lugar:</b> {poli_nombre}\n"
+            f"📍 <b>Lugar:</b> {NOMBRE_POLIDEPORTIVO}\n"
             f"🎾 <b>Cancha:</b> {nombre_cancha}\n\n"
             f"<b>Disponibilidad encontrada:</b>\n{resumen_turnos}\n\n"
             f"🔗 <a href='{url_reserva}'>RESERVAR AHORA EN SIGECI</a>"
@@ -199,28 +182,28 @@ def consultar_cancha(poli_nombre, servicio_id, cancha_info):
         if enviar_mensaje_telegram(mensaje):
             for t in turnos_nuevos_detectados:
                 TURNOS_NOTIFICADOS.add(t)
-            print(f"✅ ALERTA ENVIADA: {len(turnos_nuevos_detectados)} turnos en {poli_nombre} - {nombre_cancha}.")
+            print(f"✅ ALERTA ENVIADA: {len(turnos_nuevos_detectados)} turnos nuevos en {nombre_cancha}.")
     elif hay_turnos_reales:
-        print(f"ℹ️ {poli_nombre} - {nombre_cancha}: Turnos detectados ya notificados.")
+        print(f"ℹ️ {nombre_cancha} (Sede {sede_id}): Hay turnos libres pero ya fueron notificados.")
     else:
-        print(f"ℹ️ {poli_nombre} - {nombre_cancha}: Sin disponibilidad.")
+        print(f"ℹ️ {nombre_cancha} (Sede {sede_id}): Sin disponibilidad real.")
 
 
 if __name__ == "__main__":
-    print("🚀 Iniciando monitoreo unificado (Colegiales, Onega y Santojanni)...")
+    print(f"🚀 Iniciando monitoreo de las 4 canchas en {NOMBRE_POLIDEPORTIVO}...")
 
+    # Mensaje de arranque para verificar credenciales de Telegram
     enviar_mensaje_telegram(
-        "🚀 <b>Bot Unificado Activo:</b> Monitoreando Colegiales, Onega y Santojanni."
+        f"🚀 <b>Bot Activo:</b> Monitoreando Canchas 1, 2, 3 y 4 en {NOMBRE_POLIDEPORTIVO}."
     )
 
     while True:
         try:
-            for poli in POLIDEPORTIVOS:
-                for cancha in poli["canchas"]:
-                    consultar_cancha(poli["nombre"], poli["servicio_id"], cancha)
-                    time.sleep(0.5)
+            for cancha in CANCHAS:
+                consultar_cancha(cancha)
+                time.sleep(0.5)
         except Exception as main_e:
             print(f"❌ Error en el bucle principal: {main_e}")
 
-        # Consulta general cada 5 minutos
+        # Consulta cada 5 minutos
         time.sleep(300)
