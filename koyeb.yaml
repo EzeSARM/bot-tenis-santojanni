@@ -1,0 +1,8 @@
+type: worker
+name: bot-tenis
+app: bot-tenis-app
+type: worker
+build:
+  type: buildpack
+run:
+  command: ["python", "main.py"]
