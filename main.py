@@ -8,8 +8,9 @@ from datetime import datetime, timedelta
 # ==========================================
 # CONFIGURACIÓN Y CREDENCIALES - SANTOJANNI
 # ==========================================
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "8527874934:AAEkI3Mz-AD0sNpO2caooNM9sWyhw56x3iE")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "8295036704")
+# Carga las credenciales estrictamente desde el entorno de ejecución
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 NOMBRE_POLIDEPORTIVO = "Polideportivo Santojanni"
 SERVICIO_ID = "3125"
@@ -177,6 +178,9 @@ def obtener_estado_turnos():
 def procesar_mensajes_telegram():
     """Responde cuando el usuario consulta manualmente escribiendo al bot."""
     global LAST_UPDATE_ID, TURNOS_NOTIFICADOS
+
+    if not TELEGRAM_TOKEN:
+        return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
     params = {"timeout": 5, "offset": LAST_UPDATE_ID}
