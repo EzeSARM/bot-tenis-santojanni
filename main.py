@@ -76,7 +76,7 @@ def enviar_mensaje_telegram(mensaje, chat_id=None):
 def crear_sesion_sigeci():
     session = requests.Session()
     session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "*/*",
         "X-Requested-With": "XMLHttpRequest",
         "Referer": f"https://formulario-sigeci.buenosaires.gob.ar/AgendarTramite?idPrestacion={SERVICIO_ID}&flow=primeros"
@@ -87,36 +87,17 @@ def crear_sesion_sigeci():
         pass
     return session
 
-def obtener_dias_disponibles(session, sede_id):
-    """Obtiene el listado de fechas reales habilitadas para la sede especificada."""
-    url = "https://formulario-sigeci.buenosaires.gob.ar/getDiasDisp"
-    params = {
-        "sedeId": sede_id,
-        "servicioId": SERVICIO_ID
-    }
-    try:
-        response = session.get(url, params=params, timeout=8)
-        if response.status_code == 200:
-            datos = response.json()
-            if isinstance(datos, list):
-                dias_limpios = []
-                for item in datos:
-                    if isinstance(item, str):
-                        fecha_corta = item.split("T")[0]
-                        dias_limpios.append(fecha_corta)
-                return set(dias_limpios)
-    except Exception as e:
-        print(f"⚠️ Error al consultar días disponibles para sede {sede_id}: {e}")
-    return set()
-
 def extraer_horas_validas(lista_datos):
+    """Extrae y formatea unicamente los horarios que corresponden a un formato valido de hora."""
     horas = []
     if not isinstance(lista_datos, list):
         return horas
+
     for item in lista_datos:
         if not isinstance(item, str):
             continue
         item_str = item.strip()
+        
         if "T" in item_str:
             try:
                 dt = datetime.strptime(item_str.split(".")[0], "%Y-%m-%dT%H:%M:%S")
@@ -126,9 +107,12 @@ def extraer_horas_validas(lista_datos):
         elif ":" in item_str and len(item_str) <= 8:
             try:
                 p = item_str.split(":")
-                horas.append(f"{int(p[0]):02d}:{int(p[1]):02d} hs")
+                h, m = int(p[0]), int(p[1])
+                if 0 <= h <= 23 and 0 <= m <= 59:
+                    horas.append(f"{h:02d}:{m:02d} hs")
             except ValueError:
                 pass
+
     return sorted(list(set(horas)))
 
 def consultar_turnos_cancha(session, sede_id, fecha_str):
@@ -143,7 +127,8 @@ def consultar_turnos_cancha(session, sede_id, fecha_str):
         if response.status_code == 200:
             try:
                 datos = response.json()
-                return extraer_horas_validas(datos)
+                if isinstance(datos, list):
+                    return extraer_horas_validas(datos)
             except Exception:
                 return []
     except Exception as e:
@@ -151,13 +136,13 @@ def consultar_turnos_cancha(session, sede_id, fecha_str):
     return []
 
 def obtener_estado_turnos():
-    """Escanea las 4 canchas consultando primero los días válidos en SIGECI."""
+    """Escanea las 4 canchas directamente dia por dia durante los proximos DIAS_A_CONSULTAR."""
     global TURNOS_NOTIFICADOS
     session = crear_sesion_sigeci()
     url_reserva = f"https://formulario-sigeci.buenosaires.gob.ar/AgendarTramite?idPrestacion={SERVICIO_ID}&flow=primeros"
 
     hoy = datetime.now()
-    limite_fecha = hoy + timedelta(days=DIAS_A_CONSULTAR)
+    fechas_a_consultar = [(hoy + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(DIAS_A_CONSULTAR)]
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] Escaneando turnos en {NOMBRE_POLIDEPORTIVO}...")
 
@@ -167,42 +152,32 @@ def obtener_estado_turnos():
     turnos_visibles_actualmente = set()
 
     for cancha in CANCHAS:
-        dias_disponibles = obtener_dias_disponibles(session, cancha["sede_id"])
-        
-        if not dias_disponibles:
-            continue
-
-        for fecha in sorted(list(dias_disponibles)):
-            try:
+        for fecha in fechas_a_consultar:
+            horas = consultar_turnos_cancha(session, cancha["sede_id"], fecha)
+            if horas:
                 dt_fecha = datetime.strptime(fecha, "%Y-%m-%d")
-            except ValueError:
-                continue
+                dia_nombre = DIAS_SEMANA.get(dt_fecha.strftime("%A"), dt_fecha.strftime("%A"))
+                fecha_corta = dt_fecha.strftime("%d/%m")
+                es_fin_de_semana = dt_fecha.weekday() in [5, 6]  # 5 = Sábado, 6 = Domingo
 
-            if hoy.date() <= dt_fecha.date() <= limite_fecha.date():
-                horas = consultar_turnos_cancha(session, cancha["sede_id"], fecha)
-                if horas:
-                    dia_nombre = DIAS_SEMANA.get(dt_fecha.strftime("%A"), dt_fecha.strftime("%A"))
-                    fecha_corta = dt_fecha.strftime("%d/%m")
-                    es_fin_de_semana = dt_fecha.weekday() in [5, 6]  # 5 = Sábado, 6 = Domingo
+                horas_nuevas_cancha = []
+                for h in horas:
+                    clave_unica = f"{cancha['sede_id']}|{fecha}|{h}"
+                    turnos_visibles_actualmente.add(clave_unica)
+                    if clave_unica not in TURNOS_NOTIFICADOS:
+                        horas_nuevas_cancha.append(h)
 
-                    horas_nuevas_cancha = []
-                    for h in horas:
-                        clave_unica = f"{cancha['sede_id']}|{fecha}|{h}"
-                        turnos_visibles_actualmente.add(clave_unica)
-                        if clave_unica not in TURNOS_NOTIFICADOS:
-                            horas_nuevas_cancha.append(h)
+                linea_formateada = f"🎾 <b>{cancha['nombre']}</b> - 📅 <b>{dia_nombre} {fecha_corta}:</b> {', '.join(horas)}"
+                lineas_todas.append(linea_formateada)
 
-                    linea_formateada = f"🎾 <b>{cancha['nombre']}</b> - 📅 <b>{dia_nombre} {fecha_corta}:</b> {', '.join(horas)}"
-                    lineas_todas.append(linea_formateada)
+                if horas_nuevas_cancha:
+                    linea_nueva_formateada = f"🎾 <b>{cancha['nombre']}</b> - 📅 <b>{dia_nombre} {fecha_corta}:</b> {', '.join(horas_nuevas_cancha)}"
+                    if es_fin_de_semana:
+                        lineas_nuevas_finde.append(linea_nueva_formateada)
+                    else:
+                        lineas_nuevas_semana.append(linea_nueva_formateada)
 
-                    if horas_nuevas_cancha:
-                        linea_nueva_formateada = f"🎾 <b>{cancha['nombre']}</b> - 📅 <b>{dia_nombre} {fecha_corta}:</b> {', '.join(horas_nuevas_cancha)}"
-                        if es_fin_de_semana:
-                            lineas_nuevas_finde.append(linea_nueva_formateada)
-                        else:
-                            lineas_nuevas_semana.append(linea_nueva_formateada)
-
-                time.sleep(0.05)
+            time.sleep(0.05)
 
     TURNOS_NOTIFICADOS = TURNOS_NOTIFICADOS.intersection(turnos_visibles_actualmente)
 
